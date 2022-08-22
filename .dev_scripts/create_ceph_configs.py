@@ -1,10 +1,25 @@
 import glob
 import os.path as osp
+import re
 import shutil
 from argparse import ArgumentParser
 
 from mmengine import Config
 from tqdm import tqdm
+
+
+def update_mini_batch_size(config, args, filename):
+    found = re.search('(.+?)(\d+)xb(\d+)(.+?)', osp.basename(filename))  # noqa
+
+    if args.gpus_per_job is not None and found is not None:
+        gpu = int(found.group(2))
+        bsize = int(found.group(3))
+
+        if gpu > args.gpus_per_job:
+            config['train_dataloader'][
+                'batch_size'] = gpu * bsize // args.gpus_per_job
+
+    return config
 
 
 def update_intervals(config, args):
@@ -49,6 +64,9 @@ def update_ceph_config(filename, args, dry_run=False):
     try:
         # 0. load config
         config = Config.fromfile(filename)
+
+        config = update_mini_batch_size(config, args, filename)
+
         # 1. change dataloader
         dataloader_prefix = [
             f'{p}_dataloader' for p in ['train', 'val', 'test']
@@ -240,7 +258,7 @@ def update_ceph_config(filename, args, dry_run=False):
                     hooks['out_dir'] = save_dir
                     hooks['file_client_args'] = file_client_args
 
-        update_intervals(config, args)
+        config = update_intervals(config, args)
 
         # 4. save
         config.dump(config.filename)
